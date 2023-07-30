@@ -1,0 +1,49 @@
+<!DOCTYPE html><html>
+<head>
+    <meta charset='UTF-8'>
+    <script>
+    var thispage={
+        login:function(a, b) {
+            b.preventDefault();
+            console.log(a, b);
+            let form = {};
+            for (ii in a) {
+                if (a.hasOwnProperty(ii)) {
+                    if (a[ii].nodeName == "INPUT") {
+                        form[a[ii].name] = a[ii].value;
+                    }
+                }
+            }
+            fetch("/api/post/login", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams(form).toString(),
+            }).then(d=>{
+                if (d.status != 200) {
+                    document.getElementById('error_1').style.display = null;
+                    console.log("ERORR", d.statusText);
+                } else {
+                    console.log("OK", d);
+                }
+            }).catch(e=>{
+                document.getElementById('error_1').style.display = null;
+                console.log("ERORR", e);
+            });
+        }
+    }
+    </script>
+</head>
+<body>
+    <form onsubmit='thispage.login(this, event);'>
+        <input type='text' name='username'>
+        <br>
+        <input type='password' name='password'>
+        <br>
+        <div id='error_1' style='display:none;'>Bad username or password</div>
+        <br>
+        <button>Login</button>
+    </form>
+</body>
+</html>
