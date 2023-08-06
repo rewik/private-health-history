@@ -1,4 +1,6 @@
 
+mod password;
+
 use std::sync::Arc;
 
 use axum::{
@@ -12,6 +14,8 @@ use axum::{
 
 use axum_extra::extract::cookie::{SignedCookieJar, Cookie, Key};
 
+use password::VerifyPassword;
+
 /// Internal state shared between requests
 struct AppState {
     /// Address of the login service server
@@ -20,6 +24,8 @@ struct AppState {
     http_pool: reqwest::Client,
     /// Key used to sign cookies
     key: Key,
+    /// User password info
+    credentials: password::ArgonPasswordsInFile
 }
 
 /// User information
@@ -35,10 +41,15 @@ const LOGIN_COOKIE: &str = "phdsa";
 async fn main() {
     // TODO: load data from environment variables
     // Default settings for development
+    let Ok(users) = password::ArgonPasswordsInFile::try_from("./passwords.txt") else {
+        println!("ERROR: missing passwords file.");
+        return;
+    };
     let state: Arc<AppState> = Arc::new(AppState{
         data_server: "http://127.0.0.1:9000".to_string(),
         http_pool: reqwest::Client::new(),
         key: Key::generate(),
+        credentials: users,
     });
 
     let app = Router::new()
@@ -126,7 +137,7 @@ struct FormLogin {
 /// NOTE: Form<> consumes request body and therefore must be the LAST input variable
 async fn api_post_login(State(state): State<Arc<AppState>>, Form(form): Form<FormLogin>) -> Response {
     // TODO: implement a user/password backend
-    if form.username != "user" || form.password != "password" {
+    if !state.credentials.check_password(&form.username, &form.password) {
         return (StatusCode::UNAUTHORIZED, "").into_response();
     }
     let session = uuid::Uuid::new_v4();

@@ -2,6 +2,7 @@
 name = "private-health-history"
 version = "0.1.0"
 edition = "2021"
+default-run = "phh-server"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,3 +15,15 @@ serde = { version = "1.0.178", features = ["derive"] }
 time = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1.4.1", features = ["v4"] }
+
+rust-argon2 = "1"
+rpassword = "7.2"
+rand = "0.8"
+
+[[bin]]
+name = "phh-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "phh-argon2"
+path = "src/bin/argon2.rs"
