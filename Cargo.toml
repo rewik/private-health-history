@@ -11,10 +11,13 @@ axum = { version = "0.6" }
 axum-extra = { version = "0.7", features = ["cookie", "cookie-signed"] }
 axum-macros = "0.3.8"
 reqwest = "0.11"
+bytes = "1.1"
 serde = { version = "1.0.178", features = ["derive"] }
 time = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1.4.1", features = ["v4"] }
+
+nom = "7.1"
 
 rust-argon2 = "1"
 rpassword = "7.2"

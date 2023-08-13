@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::io::BufRead;
 
 pub trait VerifyPassword {
-    fn check_password(&self, username: &str, password: &str) -> bool;
+    fn check_password(&self, username: &str, password: &str) -> Option<u32>;
 }
 
 pub struct ArgonPasswordsInFile {
-    users: HashMap<String, String>,
+    users: HashMap<String, (u32, String)>,
 }
 
 impl ArgonPasswordsInFile {
@@ -21,10 +21,23 @@ impl ArgonPasswordsInFile {
                 break;
             }
             let line = line.unwrap();
-            let Some((username, password)) = line.split_once('~') else {
+            let mut linesplit = line.split('~');
+            let Some(uid) = linesplit.next() else {
                 continue;
             };
-            users.insert(username.to_string(), password.to_string());
+            let Some(username) = linesplit.next() else {
+                continue;
+            };
+            let Some(password) = linesplit.next() else {
+                continue;
+            };
+            if linesplit.next().is_some() {
+                continue;
+            }
+            let Ok(uid) = uid.parse() else {
+                continue;
+            };
+            users.insert(username.to_string(), (uid, password.to_string()));
             debug_loaded += 1;
         }
         println!("LOADED {debug_loaded} CREDENTIALS");
@@ -35,14 +48,17 @@ impl ArgonPasswordsInFile {
 }
 
 impl VerifyPassword for ArgonPasswordsInFile {
-    fn check_password(&self, username: &str, password: &str) -> bool {
-        let Some(pass_verify) = self.users.get(username) else {
-            return false;
+    fn check_password(&self, username: &str, password: &str) -> Option<u32> {
+        let Some((uid, pass_verify)) = self.users.get(username) else {
+            return None;
         };
         let Ok(verified) = argon2::verify_encoded(&pass_verify, password.as_bytes()) else {
-            return false;
+            return None;
         };
-
-        verified
+        if verified {
+            Some(*uid)
+        } else {
+            None
+        }
     }
 }

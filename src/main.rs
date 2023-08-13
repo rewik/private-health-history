@@ -1,5 +1,7 @@
 
 mod password;
+mod measurements;
+mod database;
 
 use std::sync::Arc;
 
@@ -25,12 +27,14 @@ struct AppState {
     /// Key used to sign cookies
     key: Key,
     /// User password info
-    credentials: password::ArgonPasswordsInFile
+    credentials: password::ArgonPasswordsInFile,
+    /// Data(base?)
+    data: database::InMemoryStorage,
 }
 
 /// User information
 struct UserInfo {
-    id: String,
+    id: u32,
 }
 
 /// Name of the signed cookie used for storing the session info
@@ -45,11 +49,16 @@ async fn main() {
         println!("ERROR: missing passwords file.");
         return;
     };
+    let Ok(db) = database::InMemoryStorage::try_from("./database.bin") else {
+        println!("ERROR: unable to generate database.");
+        return;
+    };
     let state: Arc<AppState> = Arc::new(AppState{
         data_server: "http://127.0.0.1:9000".to_string(),
         http_pool: reqwest::Client::new(),
         key: Key::generate(),
         credentials: users,
+        data: db,
     });
 
     let app = Router::new()
@@ -58,6 +67,8 @@ async fn main() {
         .route("/api/health", routing::get(api_health))
         .route("/api/version", routing::get(|| async { "0.1.0" }))
         .route("/api/post/login", routing::post(api_post_login))
+        .route("/api/post/data", routing::post(api_post_data))
+        .route("/api/get/data/all", routing::get(api_get_data))
         .with_state(state);
 
     axum::Server::bind(&"0.0.0.0:8999".parse().unwrap())
@@ -84,46 +95,19 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for UserInfo
         if resp.status() != StatusCode::OK {
             return Err((StatusCode::UNAUTHORIZED, ""));
         }
+        let Ok(body) = resp.bytes().await else {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, ""));
+        };
+        let Ok((_, uid)) = nom::number::complete::le_u32::<&[u8], ()>(body.as_ref()) else {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, ""));
+        };
 
-        //TODO: actual user info?
         Ok(UserInfo{
-            id: "user1".to_string(),
+            id: uid,
         })
     }
 }
 
-/*
-/// Fake struct used to hold cookie-related headers in case I'll need to access cookies
-/// Used since it's impossible to create axum::extract::FromRequestParts with Arc<> on one side and
-/// axum::http::HeaderMap on the other (at least one of those needs to be defined locally
-struct CookieHeaderMap {
-    headermap: axum::http::HeaderMap,
-}
-impl From<CookieHeaderMap> for axum::http::HeaderMap {
-    fn from(a: CookieHeaderMap) -> Self {
-        a.headermap
-    }
-}
-impl From<axum::http::HeaderMap> for CookieHeaderMap {
-    fn from(a: axum::http::HeaderMap) -> Self {
-        CookieHeaderMap {
-            headermap: a,
-        }
-    }
-}
-#[axum::async_trait]
-impl axum::extract::FromRequestParts<Arc<AppState>> for CookieHeaderMap
-{
-    type Rejection = (StatusCode, &'static str);
-    async fn from_request_parts(parts: &mut Parts, _: &Arc<AppState>) -> Result<Self, Self::Rejection> {
-        let mut chm = axum::http::HeaderMap::new();
-        if let Some(cv) = parts.headers.get(axum::http::header::COOKIE) {
-            chm.insert(axum::http::header::COOKIE, cv.clone());
-        }
-        Ok(chm.into())
-    }
-}
-*/
 
 /// Login Form - username & password
 #[derive(serde::Deserialize)]
@@ -136,16 +120,16 @@ struct FormLogin {
 /// API endpoint for creating a session provided proper authentication data is sent in the request
 /// NOTE: Form<> consumes request body and therefore must be the LAST input variable
 async fn api_post_login(State(state): State<Arc<AppState>>, Form(form): Form<FormLogin>) -> Response {
-    // TODO: implement a user/password backend
-    if !state.credentials.check_password(&form.username, &form.password) {
+    let Some(uid) = state.credentials.check_password(&form.username, &form.password) else {
         return (StatusCode::UNAUTHORIZED, "").into_response();
-    }
+    };
+    let uid_str = format!("{}", uid);
+    let uid = Vec::from(uid.to_le_bytes());
     let session = uuid::Uuid::new_v4();
-    let session_data = format!("{}/{:X}", "user1", session.as_simple());
+    let session_data = format!("{}/{:X}", uid_str, session.as_simple());
     let query = format!("{}/api/post/one/{}", state.data_server, session_data);
     let Ok(resp) = state.http_pool.post(&query)
-        //TODO: store some actual info?
-        .body(b"HELLO".as_ref())
+        .body(uid)
         .send().await else {
             return (StatusCode::SERVICE_UNAVAILABLE, "").into_response();
     };
@@ -163,6 +147,16 @@ async fn api_post_login(State(state): State<Arc<AppState>>, Form(form): Form<For
          );
 
     (StatusCode::OK, jar, "/main").into_response()
+}
+
+async fn api_post_data(State(state): State<Arc<AppState>>, user: UserInfo, axum::extract::Json(body): axum::extract::Json<database::PerUserData>) -> Response {
+    state.data.store_data(user.id, body).await;
+    (StatusCode::OK, "").into_response()
+}
+
+async fn api_get_data(State(state): State<Arc<AppState>>, user: UserInfo) -> axum::Json<database::PerUserData>{
+    let data = state.data.retrieve_data(user.id).await;
+    axum::Json(data)
 }
 
 /// Server health status:
